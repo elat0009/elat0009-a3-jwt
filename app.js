@@ -8,8 +8,8 @@ const app = express()
 app.use(express.json())
 app.use(require('express-mongo-sanitize')())
 
-app.use('/api/cars', require('./routes/cars'))
-app.use('/api/people', require('./routes/people'))
+app.use('/api/courses', require('./routes/cource'))
+app.use('/api/student', require('./routes/student'))
 app.use('/auth', require('./routes/auth'))
 
 
