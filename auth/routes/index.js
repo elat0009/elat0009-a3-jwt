@@ -1,30 +1,19 @@
-const express = require('express')
-const router = express.Router()
+const debug = require('debug')('week8:auth')
+const User = require('../models/User');
 const sanitizeBody = require('../middleware/sanitizeBody')
-const authorize = require('../middleware/auth')
-const User = require('../../models/User')
+const express = require('express')
+const router = express.Router();
+const authorize = require('../middleware/auth');
+const Attempt = require('../models/authentication_attempts');
 
 
-router.get('/users/me', authorize, async (req, res) => {
-      // Load the User document from the database using the `_id` in the JWT
-    const user = await User.findById(req.user._id).select('-password -__v')
-  // Remember to redact sensitive data like the user's password
-  // Send the data back to the client.
-    res.send({ data: user })
-})
-// Register a new user
-router.post('/user', sanitizeBody, async (req, res) => 
-{
-    try 
-    {
+router.post('/users', sanitizeBody, async (req, res) => {
+try {
     let newUser = new User(req.sanitizedBody)
     const itExists = !!(await User.countDocuments({ email: newUser.email }))
-    if (itExists) 
-    {
-        return res.status(400).send
-        ({
-        errors: 
-        [
+    if (itExists) {
+        return res.status(400).send({
+        errors: [
             {
             status: 'Bad Request',
             code: '400',
@@ -33,48 +22,66 @@ router.post('/user', sanitizeBody, async (req, res) =>
             source: { pointer: '/data/attributes/email' }
             }
         ]
-        })
+    })
     }
-        await newUser.save()
-        res.status(201).send({ data: newUser })
-    }  catch (err) 
-    {
-        res.status(500).send
-    ({
-        errors: 
-        [
+    await newUser.save()
+    res.status(201).send({ data: newUser })
+    } catch (err) {
+    debug('Error saving new user: ', err.message)
+    res.status(500).send({
+        errors: [
         {
-            status: 'Internal Server Error',
+            status: 'Server error',
+            code: '500',
+            title: 'Problem saving document to the database.'
+        }
+    ]
+    })
+}
+})
+
+router.get('/users/me', authorize, async (req, res) => {
+const user = await User.findById(req.user._id);
+res.send({ data: user });
+});
+router.post('/tokens', sanitizeBody, async (req, res) => {
+    const { email, password } = req.sanitizedBody
+    try {
+    let newAttempt = new Attempt({
+        username: email,
+        ipAddress: req.connection.remoteAddress,
+        didSucceed: true,
+        createAt: Date.now()
+    });
+    await newAttempt.save();
+    const user = await User.authenticate(email, password)
+    if (!user) {
+        newAttempt.didSucceed = false;
+        await newAttempt.save();
+        return res.status(401).send({
+        errors: [
+        {
+            status: 'Unauthorized',
+            code: '401',
+            title: 'Authentication failed',
+            description: 'Incorrect username or password.'
+        }
+        ]
+    })
+    }
+    res.status(201).send({ data: { token: user.generateAuthToken() } })
+} catch (err) {
+    debug(`Error authenticating user ... `, err.message)
+    res.status(500).send({
+        errors: [
+        {
+            status: 'Server error',
             code: '500',
             title: 'Problem saving document to the database.'
         }
         ]
     })
-    }
-})
-
-  // Login a user and return an authentication token.
-router.post('/tokens', sanitizeBody, async (req, res) => 
-{
-    const { email, password } = req.sanitizedBody
-    const user = await User.authenticate(email, password)
-
-    if (!user) 
-    {
-        return res.status(401).send(
-        {
-            errors: 
-            [
-            {
-                status: 'Unauthorized',
-                code : '401',
-                title: "Incorrect username pr password"
-            }
-            ]
-        })
-    }
-    // const token = jwt.sign({ _id: user._id }, 'superSecureSecret')
-    res.status(201).send({ data: { token: user.generateAuthToken() } })
+}
 })
 
 module.exports = router
